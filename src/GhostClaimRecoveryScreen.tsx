@@ -8,14 +8,14 @@ import {
   Package,
   Users,
   ShieldCheck,
-  ShieldAlert,
-  History,
   TimerReset,
 } from "lucide-react";
 import type { VolunteerReservation, GhostRecoveryEvent, ReservationCustodyStatus } from "./types";
 import { initialReservations, DEMO_NOW } from "./seedData";
+import { useDispatchStore } from "./DispatchContext";
 
 export function GhostClaimRecoveryScreen() {
+  const { recoverGhostClaim, availableInventory } = useDispatchStore();
   const [simTime, setSimTime] = useState<number>(DEMO_NOW);
   const [timeoutMinutes, setTimeoutMinutes] = useState<number>(15);
   const [reservations, setReservations] = useState<VolunteerReservation[]>(() => structuredClone(initialReservations));
@@ -32,7 +32,7 @@ export function GhostClaimRecoveryScreen() {
       reason: "Pickup timeout exceeded 15m; 20 unpicked meals safely returned to stock.",
     },
   ]);
-  const [batchInventory, setBatchInventory] = useState<number>(180);
+  const [batchInventory, setBatchInventory] = useState<number>(availableInventory || 180);
 
   // Compute live status of reservations based on current simTime & timeoutMinutes
   const processedReservations = useMemo(() => {
@@ -99,6 +99,7 @@ export function GhostClaimRecoveryScreen() {
       prev.map((r) => (r.id === resId ? { ...r, custodyStatus: "RECOVERED", recoveredAt: simTime } : r)),
     );
 
+    recoverGhostClaim(target.id);
     setBatchInventory((curr) => curr + target.quantity);
 
     const timeStr = new Date(simTime).toISOString().slice(11, 16);
@@ -310,210 +311,140 @@ export function GhostClaimRecoveryScreen() {
         </div>
       </section>
 
-      {/* Main Two-Column Layout: Reservations Countdown Table vs Event Stream */}
-      <div className="workspace-layout">
-        {/* Left Column: Active Reservations Table */}
-        <div className="results-column">
-          <div className="panel">
-            <div className="panel-heading">
-              <div>
-                <p className="eyebrow">MONITORED RESERVATIONS</p>
-                <h3>Active Custody & Reservation Ledger</h3>
-              </div>
-              <div className="heading-badges">
-                <span className="badge teal">
-                  <Package size={13} /> {processedReservations.length} Tracked
-                </span>
-                {ghostClaims.length > 0 && (
-                  <span className="badge bad">
-                    <AlertTriangle size={13} /> {ghostClaims.length} Expired Ghost Claims
-                  </span>
-                )}
-              </div>
-            </div>
-
-            <div className="table-scroll">
-              <table className="results-table">
-                <thead>
-                  <tr>
-                    <th>VOLUNTEER RIDER</th>
-                    <th>CLAIMED</th>
-                    <th>RESERVED AT</th>
-                    <th>TIMEOUT COUNTDOWN</th>
-                    <th>CUSTODY STATUS</th>
-                    <th>ACTION</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {processedReservations.map((res) => {
-                    const elapsedMinutes = (simTime - res.reservedAt) / 60_000;
-                    const remainingMins = Math.max(0, timeoutMinutes - elapsedMinutes);
-                    const isExpired = elapsedMinutes > timeoutMinutes && res.custodyStatus !== "IN_CUSTODY_PICKED_UP" && res.custodyStatus !== "RECOVERED";
-
-                    return (
-                      <tr key={res.id} className="assignment-row">
-                        <td>
-                          <div className="rider-cell">
-                            <div className="rider-avatar">{res.riderName[0]}</div>
-                            <div>
-                              <strong className="rider-name">{res.riderName}</strong>
-                              <span className="rider-id-badge mono">{res.id} · {res.riderId}</span>
-                            </div>
-                          </div>
-                        </td>
-
-                        <td>
-                          <div className="qty-cell">
-                            <strong className="qty-num">{res.quantity}</strong>
-                            <small className="qty-unit">meals</small>
-                          </div>
-                        </td>
-
-                        <td>
-                          <span className="mono text-muted">
-                            {new Date(res.reservedAt).toISOString().slice(11, 16)} UTC
-                          </span>
-                        </td>
-
-                        <td>
-                          {res.custodyStatus === "IN_CUSTODY_PICKED_UP" ? (
-                            <span className="badge good">
-                              <CheckCircle2 size={12} /> In Transit
-                            </span>
-                          ) : res.custodyStatus === "RECOVERED" ? (
-                            <span className="badge teal">
-                              Recovered to Stock
-                            </span>
-                          ) : isExpired ? (
-                            <span className="badge bad">
-                              <Clock size={12} /> Expired by {Math.round(elapsedMinutes - timeoutMinutes)}m
-                            </span>
-                          ) : (
-                            <span className="badge warn">
-                              <Clock size={12} /> {Math.ceil(remainingMins)}m remaining
-                            </span>
-                          )}
-                        </td>
-
-                        <td>
-                          {res.custodyStatus === "RESERVED_UNPICKED" && !isExpired && (
-                            <span className="status-chip ready">
-                              <span className="pulse-dot" /> Awaiting Pickup
-                            </span>
-                          )}
-                          {(res.custodyStatus === "EXPIRED_GHOST" || isExpired) && (
-                            <span className="severity-tag critical">
-                              GHOST CLAIM
-                            </span>
-                          )}
-                          {res.custodyStatus === "IN_CUSTODY_PICKED_UP" && (
-                            <span className="status-chip ready" style={{ color: "#38bdf8", borderColor: "rgba(56, 189, 248, 0.4)" }}>
-                              <ShieldCheck size={12} /> IN CUSTODY
-                            </span>
-                          )}
-                          {res.custodyStatus === "RECOVERED" && (
-                            <span className="severity-tag hard_gate" style={{ background: "rgba(112, 240, 190, 0.12)", color: "#70f0be" }}>
-                              RECOVERED
-                            </span>
-                          )}
-                        </td>
-
-                        <td>
-                          {isExpired && res.custodyStatus !== "RECOVERED" ? (
-                            <button
-                              className="action-btn-release"
-                              onClick={() => handleRecover(res.id)}
-                            >
-                              Release {res.quantity} Meals
-                            </button>
-                          ) : res.custodyStatus === "IN_CUSTODY_PICKED_UP" ? (
-                            <span className="mono text-muted" title="Food is already physically on the road. Cannot release back to kitchen.">
-                              Protected
-                            </span>
-                          ) : res.custodyStatus === "RECOVERED" ? (
-                            <span className="mono text-mint">
-                              Restored ✓
-                            </span>
-                          ) : (
-                            <span className="mono text-muted">
-                              Active Slot
-                            </span>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+      {/* Full-Screen Monitored Reservations Ledger */}
+      <section className="panel ghost-ledger-fullscreen">
+        <div className="panel-heading">
+          <div>
+            <p className="eyebrow">MONITORED RESERVATIONS</p>
+            <h3>Active Custody &amp; Reservation Ledger</h3>
+          </div>
+          <div className="heading-badges">
+            <span className="badge teal">
+              <Package size={13} /> {processedReservations.length} Tracked
+            </span>
+            {ghostClaims.length > 0 && (
+              <span className="badge bad">
+                <AlertTriangle size={13} /> {ghostClaims.length} Expired Ghost Claims
+              </span>
+            )}
           </div>
         </div>
 
-        {/* Right Column: Custody Safety Rules & Real-time Recovery Audit Ledger */}
-        <aside className="controls-column">
-          {/* Custody Rule Card */}
-          <div className="panel">
-            <div className="panel-heading compact">
-              <div>
-                <p className="eyebrow">CRITICAL CUSTODY GATES</p>
-                <h3>Food Release Rules</h3>
-              </div>
-              <ShieldAlert size={16} className="text-amber" />
-            </div>
-            <div className="rules-list">
-              <div className="rule-item">
-                <span className="rule-num">01</span>
-                <div>
-                  <strong>Only Unpicked Parcels Can Return to Stock</strong>
-                  <p>Once a volunteer marks custody via physical QR scan, meals cannot be returned to kitchen stock.</p>
-                </div>
-              </div>
-              <div className="rule-item">
-                <span className="rule-num">02</span>
-                <div>
-                  <strong>Deterministic Timeout Clock</strong>
-                  <p>Reservations uncollected past {timeoutMinutes}m automatically lapse to prevent stock black holes.</p>
-                </div>
-              </div>
-              <div className="rule-item">
-                <span className="rule-num">03</span>
-                <div>
-                  <strong>Immediate Re-allocation Eligibility</strong>
-                  <p>Released quantities are instantly available in the Smart Batch Allocation pool.</p>
-                </div>
-              </div>
-            </div>
-          </div>
+        <div className="table-scroll">
+          <table className="results-table ghost-fullscreen-table">
+            <thead>
+              <tr>
+                <th style={{ minWidth: 220 }}>VOLUNTEER RIDER</th>
+                <th style={{ minWidth: 100 }}>CLAIMED</th>
+                <th style={{ minWidth: 130 }}>RESERVED AT</th>
+                <th style={{ minWidth: 200 }}>TIMEOUT COUNTDOWN</th>
+                <th style={{ minWidth: 160 }}>CUSTODY STATUS</th>
+                <th style={{ minWidth: 160, textAlign: "right" }}>ACTION</th>
+              </tr>
+            </thead>
+            <tbody>
+              {processedReservations.map((res) => {
+                const elapsedMinutes = (simTime - res.reservedAt) / 60_000;
+                const remainingMins = Math.max(0, timeoutMinutes - elapsedMinutes);
+                const isExpired = elapsedMinutes > timeoutMinutes && res.custodyStatus !== "IN_CUSTODY_PICKED_UP" && res.custodyStatus !== "RECOVERED";
 
-          {/* Audit Ledger */}
-          <div className="panel">
-            <div className="panel-heading compact">
-              <div>
-                <p className="eyebrow">AUDIT TRAIL</p>
-                <h3>Recovery Event Log</h3>
-              </div>
-              <History size={15} className="text-mint" />
-            </div>
+                return (
+                  <tr key={res.id} className="assignment-row">
+                    <td>
+                      <div className="rider-cell">
+                        <div className="rider-avatar">{res.riderName[0]}</div>
+                        <div>
+                          <strong className="rider-name" style={{ fontSize: "0.95rem" }}>{res.riderName}</strong>
+                          <span className="rider-id-badge mono">{res.id} · {res.riderId}</span>
+                        </div>
+                      </div>
+                    </td>
 
-            <div className="event-stream" style={{ maxHeight: "360px", overflowY: "auto" }}>
-              {events.map((ev) => (
-                <div key={ev.id} className="event-stream-item">
-                  <div className="event-bullet" />
-                  <div className="event-content">
-                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
-                      <strong className="mono" style={{ color: "#70f0be", fontSize: 10 }}>{ev.reservationId}</strong>
-                      <span className="mono" style={{ fontSize: 9, color: "#94a3b8" }}>
-                        {new Date(ev.timestamp).toISOString().slice(11, 19)} UTC
+                    <td>
+                      <div className="qty-cell">
+                        <strong className="qty-num">{res.quantity}</strong>
+                        <small className="qty-unit">meals</small>
+                      </div>
+                    </td>
+
+                    <td>
+                      <span className="mono text-muted">
+                        {new Date(res.reservedAt).toISOString().slice(11, 16)} UTC
                       </span>
-                    </div>
-                    <span className="event-text">{ev.reason}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </aside>
-      </div>
+                    </td>
+
+                    <td>
+                      {res.custodyStatus === "IN_CUSTODY_PICKED_UP" ? (
+                        <span className="badge good">
+                          <CheckCircle2 size={12} /> In Transit
+                        </span>
+                      ) : res.custodyStatus === "RECOVERED" ? (
+                        <span className="badge teal">
+                          Recovered to Stock
+                        </span>
+                      ) : isExpired ? (
+                        <span className="badge bad">
+                          <Clock size={12} /> Expired by {Math.round(elapsedMinutes - timeoutMinutes)}m
+                        </span>
+                      ) : (
+                        <span className="badge warn">
+                          <Clock size={12} /> {Math.ceil(remainingMins)}m remaining
+                        </span>
+                      )}
+                    </td>
+
+                    <td>
+                      {res.custodyStatus === "RESERVED_UNPICKED" && !isExpired && (
+                        <span className="status-chip ready">
+                          <span className="pulse-dot" /> Awaiting Pickup
+                        </span>
+                      )}
+                      {(res.custodyStatus === "EXPIRED_GHOST" || isExpired) && (
+                        <span className="severity-tag critical">
+                          GHOST CLAIM
+                        </span>
+                      )}
+                      {res.custodyStatus === "IN_CUSTODY_PICKED_UP" && (
+                        <span className="status-chip ready" style={{ color: "#38bdf8", borderColor: "rgba(56, 189, 248, 0.4)" }}>
+                          <ShieldCheck size={12} /> IN CUSTODY
+                        </span>
+                      )}
+                      {res.custodyStatus === "RECOVERED" && (
+                        <span className="severity-tag hard_gate" style={{ background: "rgba(112, 240, 190, 0.12)", color: "#70f0be" }}>
+                          RECOVERED
+                        </span>
+                      )}
+                    </td>
+
+                    <td style={{ textAlign: "right" }}>
+                      {isExpired && res.custodyStatus !== "RECOVERED" ? (
+                        <button
+                          className="action-btn-release"
+                          onClick={() => handleRecover(res.id)}
+                        >
+                          Release {res.quantity} Meals
+                        </button>
+                      ) : res.custodyStatus === "IN_CUSTODY_PICKED_UP" ? (
+                        <span className="mono text-muted" title="Food is already physically on the road. Cannot release back to kitchen.">
+                          Protected
+                        </span>
+                      ) : res.custodyStatus === "RECOVERED" ? (
+                        <span className="mono text-mint" style={{ fontWeight: 600 }}>
+                          Restored ✓
+                        </span>
+                      ) : (
+                        <span className="mono text-muted">
+                          Active Slot
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </div>
   );
 }

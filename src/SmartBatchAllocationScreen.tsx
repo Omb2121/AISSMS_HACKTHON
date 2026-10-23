@@ -4,100 +4,69 @@ import {
   Clock,
   MapPin,
   ShieldCheck,
-  Zap,
   RotateCcw,
-  RefreshCw,
   Users,
   Building2,
   AlertTriangle,
   CheckCircle2,
-  TrendingUp,
-  SlidersHorizontal,
-  ChevronDown,
-  ChevronUp,
   Calendar,
   Sparkles,
+  Plus,
+  Truck,
+  Edit3,
+  ShieldAlert,
 } from "lucide-react";
-import type { DonationBatch, Rider, Shelter, AllocationConfig, AllocationResult } from "./types";
-import { availableBatches, initialConfig, initialRiders, initialShelters, DEMO_NOW } from "./seedData";
-import { allocateBatch } from "./allocator";
-import { BlockedCandidatesTable } from "./BlockedCandidatesTable";
+import { DEMO_NOW } from "./seedData";
 import { NetworkVisualizer } from "./NetworkVisualizer";
+import { useDispatchStore } from "./DispatchContext";
+import { ManualAllocationModal } from "./ManualAllocationModal";
+import { ShelterManagementModal } from "./ShelterManagementModal";
 
 export function SmartBatchAllocationScreen() {
-  const [batches, setBatches] = useState<DonationBatch[]>(() => structuredClone(availableBatches));
-  const [selectedBatchId, setSelectedBatchId] = useState<string>("BATCH-240");
-  const [riders, setRiders] = useState<Rider[]>(() => structuredClone(initialRiders));
-  const [shelters, setShelters] = useState<Shelter[]>(() => structuredClone(initialShelters));
-  const [config, setConfig] = useState<AllocationConfig>(() => structuredClone(initialConfig));
-  const [showConfig, setShowConfig] = useState<boolean>(false);
+  const {
+    batches,
+    riders,
+    shelters,
+    assignments,
+    events,
+    totalDonated,
+    availableInventory,
+    reservedMeals,
+    mealsWithRiders,
+    deliveredMeals,
+    unallocatedMeals,
+    activeRidersCount,
+    availableRidersCount,
+    partiallyLoadedCount,
+    fullyLoadedCount,
+    openSheltersCount,
+    remainingShelterDemand,
+    confirmDispatch,
+    markPickedUp,
+    markDelivered,
+    releaseAssignment,
+    toggleShelterStatus,
+    toggleRiderAvailability,
+    loadSampleScenario,
+  } = useDispatchStore();
+
+  const [selectedBatchId, setSelectedBatchId] = useState<string>(batches[0]?.id || "BATCH-240");
   const [activeTab, setActiveTab] = useState<"PLAN" | "TOPOLOGY">("PLAN");
-  const [runKey, setRunKey] = useState<number>(1);
-  const [hoveredScoreId, setHoveredScoreId] = useState<string | null>(null);
+
+  // Modals state
+  const [isManualModalOpen, setIsManualModalOpen] = useState(false);
+  const [preselectedRiderId, setPreselectedRiderId] = useState<string | undefined>(undefined);
+  const [preselectedShelterId, setPreselectedShelterId] = useState<string | undefined>(undefined);
+  const [isShelterModalOpen, setIsShelterModalOpen] = useState(false);
+  const [editingShelterId, setEditingShelterId] = useState<string | null>(null);
+
+  // Action status message banner
+  const [actionFeedback, setActionFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
   // Currently selected batch
   const currentBatch = useMemo(() => {
     return batches.find((b) => b.id === selectedBatchId) ?? batches[0];
   }, [batches, selectedBatchId]);
-
-  // Execute deterministic allocation algorithm
-  const allocationResult: AllocationResult = useMemo(() => {
-    return allocateBatch(currentBatch, riders, shelters, DEMO_NOW, config);
-  }, [currentBatch, riders, shelters, config, runKey]);
-
-  // Handle Run Allocation / Recalculate
-  const handleRunAllocation = () => {
-    setRunKey((k) => k + 1);
-  };
-
-  // Reset to initial state
-  const handleReset = () => {
-    setBatches(structuredClone(availableBatches));
-    setSelectedBatchId("BATCH-240");
-    setRiders(structuredClone(initialRiders));
-    setShelters(structuredClone(initialShelters));
-    setConfig(structuredClone(initialConfig));
-    setRunKey((k) => k + 1);
-  };
-
-  // Toggle Shelter Status (Open / Closed)
-  const toggleShelterStatus = (shelterId: string) => {
-    setShelters((prev) =>
-      prev.map((s) => (s.id === shelterId ? { ...s, status: s.status === "open" ? "closed" : "open" } : s)),
-    );
-  };
-
-  // Toggle Rider Availability
-  const toggleRiderAvailable = (riderId: string) => {
-    setRiders((prev) =>
-      prev.map((r) => (r.id === riderId ? { ...r, available: !r.available } : r)),
-    );
-  };
-
-  // Update batch safe until duration
-  const updateBatchSafeMinutes = (mins: number) => {
-    setBatches((prev) =>
-      prev.map((b) => (b.id === currentBatch.id ? { ...b, safeUntil: DEMO_NOW + mins * 60_000 } : b)),
-    );
-  };
-
-  // Update batch quantity
-  const updateBatchQuantity = (qty: number) => {
-    setBatches((prev) =>
-      prev.map((b) => (b.id === currentBatch.id ? { ...b, quantity: qty } : b)),
-    );
-  };
-
-  // Update weight parameters
-  const updateWeight = (key: keyof AllocationConfig["weights"], val: number) => {
-    setConfig((prev) => ({
-      ...prev,
-      weights: {
-        ...prev.weights,
-        [key]: val,
-      },
-    }));
-  };
 
   // Calculate live countdown string for the batch
   const getSafeLifeCountdown = (safeUntil: number) => {
@@ -108,59 +77,273 @@ export function SmartBatchAllocationScreen() {
     return `${hrs > 0 ? `${hrs}h ` : ""}${mins}m remaining`;
   };
 
-  const safeMinutesRemaining = Math.max(0, Math.round((currentBatch.safeUntil - DEMO_NOW) / 60_000));
-  const safeLifeClass = safeMinutesRemaining > 30 ? "good" : safeMinutesRemaining >= 10 ? "warn" : "bad";
+  // Action Handlers
+  const handleConfirmDispatch = (assignmentId: string) => {
+    const res = confirmDispatch(assignmentId);
+    if (res.success) {
+      setActionFeedback({ type: "success", message: "Dispatch confirmed! Rider ready for hub pickup." });
+    } else {
+      setActionFeedback({ type: "error", message: res.error || "Failed to confirm dispatch." });
+    }
+  };
 
-  // Summary Metrics
-  const totalFleetCapacity = riders.reduce((sum, r) => sum + (r.available ? r.carryingCapacity : 0), 0);
-  const totalUsedCapacity = allocationResult.allocatedQuantity;
-  const fleetUtilization = totalFleetCapacity > 0 ? Math.round((totalUsedCapacity / totalFleetCapacity) * 100) : 0;
+  const handleMarkPickedUp = (assignmentId: string) => {
+    const res = markPickedUp(assignmentId);
+    if (res.success) {
+      setActionFeedback({ type: "success", message: "Cargo picked up! Rider is now On Delivery with physical custody." });
+    } else {
+      setActionFeedback({ type: "error", message: res.error || "Failed to mark picked up." });
+    }
+  };
 
-  const totalDemand = shelters.reduce((sum, s) => sum + (s.status === "open" ? s.requestedQuantity : 0), 0);
-  const demandSatisfaction = totalDemand > 0 ? Math.round((allocationResult.allocatedQuantity / totalDemand) * 100) : 0;
+  const handleMarkDelivered = (assignmentId: string) => {
+    const res = markDelivered(assignmentId);
+    if (res.success) {
+      setActionFeedback({ type: "success", message: "Delivery confirmed at shelter! Rider capacity released and now Available." });
+    } else {
+      setActionFeedback({ type: "error", message: res.error || "Failed to mark delivered." });
+    }
+  };
+
+  const handleReleaseAssignment = (assignmentId: string) => {
+    if (confirm("Are you sure you want to release this assignment back to inventory?")) {
+      const res = releaseAssignment(assignmentId);
+      if (res.success) {
+        setActionFeedback({ type: "success", message: "Assignment cancelled and meals released back to batch inventory." });
+      } else {
+        setActionFeedback({ type: "error", message: res.error || "Failed to release assignment." });
+      }
+    }
+  };
+
+  const handleOpenManualModal = (riderId?: string, shelterId?: string) => {
+    setPreselectedRiderId(riderId);
+    setPreselectedShelterId(shelterId);
+    setIsManualModalOpen(true);
+  };
+
+  const handleOpenShelterModal = (shelterId?: string) => {
+    setEditingShelterId(shelterId || null);
+    setIsShelterModalOpen(true);
+  };
+
+  const handleLoadSampleScenario = () => {
+    if (confirm("Load 180-meal judge test scenario? This sets 180 donated meals, 5 riders (40 cap each), and 5 editable shelters.")) {
+      loadSampleScenario();
+      setSelectedBatchId("BATCH-240");
+      setActionFeedback({ type: "success", message: "Sample scenario loaded! 180 meals, 5 riders (40 cap), 5 shelters ready." });
+    }
+  };
 
   return (
     <div className="batch-allocation-workspace">
       {/* Workspace Header */}
       <div className="screen-header">
         <div>
-          <div className="eyebrow">DETERMINISTIC LOGISTICS · RESQFLOW CORE</div>
-          <h2>Smart Batch Allocation Workspace</h2>
+          <div className="eyebrow">OPERATIONAL COMMAND · DISPATCH OS</div>
+          <h2>Manual Food Allocation & Rider Dispatch</h2>
           <p className="screen-description">
-            Distribute surplus perishable food batches across volunteer riders and shelters with strict food safety,
-            route feasibility, and real-time capacity validation.
+            Interactive command center for manual batch allocation, rider payload tracking, shelter intake status,
+            and end-to-end chain of custody with 100% dynamic live counts.
           </p>
         </div>
 
         <div className="header-action-bar">
-          <button className="primary-run-button" onClick={handleRunAllocation}>
-            <Zap size={16} /> Run Allocation
+          <button className="primary-run-button" onClick={() => handleOpenManualModal()}>
+            <Plus size={16} /> Allocate Food
           </button>
-          <button className="ghost-reset-button" onClick={handleRunAllocation}>
-            <RefreshCw size={14} /> Recalculate
+          <button className="ghost-reset-button" onClick={() => handleOpenShelterModal()}>
+            <Building2 size={14} /> Manage Shelters
           </button>
-          <button className="ghost-reset-button" onClick={handleReset}>
-            <RotateCcw size={14} /> Reset
+          <button className="ghost-reset-button" onClick={handleLoadSampleScenario} title="Set baseline 180 meals, 5 riders, 5 shelters">
+            <RotateCcw size={14} /> Load Sample Scenario
           </button>
         </div>
       </div>
+
+      {/* Action Feedback Banner */}
+      {actionFeedback && (
+        <div
+          className={`active-scenario-banner ${actionFeedback.type === "success" ? "banner-success" : "banner-error"}`}
+          style={{ marginBottom: 20 }}
+        >
+          <div className="banner-badge">
+            {actionFeedback.type === "success" ? (
+              <CheckCircle2 size={15} className="text-mint" />
+            ) : (
+              <AlertTriangle size={15} className="text-coral" />
+            )}
+            <span>{actionFeedback.type === "success" ? "ACTION VERIFIED" : "GATE VIOLATION"}</span>
+          </div>
+          <p className="banner-text">
+            <strong>{actionFeedback.message}</strong>
+          </p>
+          <button className="banner-reset-link" onClick={() => setActionFeedback(null)}>
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {/* Prominent Live Counts Dashboard (All 12 Metrics strictly from live state) */}
+      <section className="live-counts-section" style={{ marginBottom: 24 }}>
+        <div className="section-title-row" style={{ marginBottom: 12 }}>
+          <div>
+            <span className="eyebrow">SECTION 01 / DYNAMIC TELEMETRY</span>
+            <h3 style={{ fontSize: "1.1rem" }}>Accurate Live Counts & State Telemetry</h3>
+          </div>
+          <span className="micro-badge">100% REAL-TIME STATE · ZERO HARDCODING</span>
+        </div>
+
+        {/* 12 Prominent Dynamic Metric Cards in 2 Responsive Rows */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
+          {/* 1. Total donated meals */}
+          <div className="metric-card metric-mint" style={{ padding: "14px 16px" }}>
+            <div className="metric-header" style={{ marginBottom: 6 }}>
+              <span className="metric-label" style={{ fontSize: "0.68rem" }}>TOTAL DONATED</span>
+              <div className="metric-icon-wrap" style={{ width: 28, height: 28 }}><Package size={14} /></div>
+            </div>
+            <strong className="metric-value" style={{ fontSize: "1.5rem" }}>{totalDonated}</strong>
+            <small className="metric-subtext">Cumulative donations</small>
+          </div>
+
+          {/* 2. Available in inventory */}
+          <div className="metric-card metric-teal" style={{ padding: "14px 16px" }}>
+            <div className="metric-header" style={{ marginBottom: 6 }}>
+              <span className="metric-label" style={{ fontSize: "0.68rem" }}>AVAILABLE INVENTORY</span>
+              <div className="metric-icon-wrap" style={{ width: 28, height: 28 }}><Package size={14} /></div>
+            </div>
+            <strong className="metric-value text-mint" style={{ fontSize: "1.5rem" }}>{availableInventory}</strong>
+            <small className="metric-subtext">Ready for allocation</small>
+          </div>
+
+          {/* 3. Meals reserved */}
+          <div className="metric-card metric-amber" style={{ padding: "14px 16px" }}>
+            <div className="metric-header" style={{ marginBottom: 6 }}>
+              <span className="metric-label" style={{ fontSize: "0.68rem" }}>MEALS RESERVED</span>
+              <div className="metric-icon-wrap" style={{ width: 28, height: 28 }}><Clock size={14} /></div>
+            </div>
+            <strong className="metric-value" style={{ fontSize: "1.5rem" }}>{reservedMeals}</strong>
+            <small className="metric-subtext">Allocated or confirmed</small>
+          </div>
+
+          {/* 4. Meals with riders */}
+          <div className="metric-card metric-violet" style={{ padding: "14px 16px" }}>
+            <div className="metric-header" style={{ marginBottom: 6 }}>
+              <span className="metric-label" style={{ fontSize: "0.68rem" }}>WITH RIDERS (TRANSIT)</span>
+              <div className="metric-icon-wrap" style={{ width: 28, height: 28 }}><Truck size={14} /></div>
+            </div>
+            <strong className="metric-value text-cyan" style={{ fontSize: "1.5rem" }}>{mealsWithRiders}</strong>
+            <small className="metric-subtext">Physical custody on road</small>
+          </div>
+
+          {/* 5. Successfully delivered */}
+          <div className="metric-card metric-mint" style={{ padding: "14px 16px" }}>
+            <div className="metric-header" style={{ marginBottom: 6 }}>
+              <span className="metric-label" style={{ fontSize: "0.68rem" }}>DELIVERED MEALS</span>
+              <div className="metric-icon-wrap" style={{ width: 28, height: 28 }}><CheckCircle2 size={14} /></div>
+            </div>
+            <strong className="metric-value text-mint" style={{ fontSize: "1.5rem" }}>{deliveredMeals}</strong>
+            <small className="metric-subtext">Verified handovers</small>
+          </div>
+
+          {/* 6. Remaining unallocated */}
+          <div className="metric-card metric-teal" style={{ padding: "14px 16px" }}>
+            <div className="metric-header" style={{ marginBottom: 6 }}>
+              <span className="metric-label" style={{ fontSize: "0.68rem" }}>UNALLOCATED MEALS</span>
+              <div className="metric-icon-wrap" style={{ width: 28, height: 28 }}><AlertTriangle size={14} /></div>
+            </div>
+            <strong className="metric-value" style={{ fontSize: "1.5rem" }}>{unallocatedMeals}</strong>
+            <small className="metric-subtext">Unassigned surplus</small>
+          </div>
+
+          {/* 7. Active riders */}
+          <div className="metric-card metric-violet" style={{ padding: "14px 16px" }}>
+            <div className="metric-header" style={{ marginBottom: 6 }}>
+              <span className="metric-label" style={{ fontSize: "0.68rem" }}>ACTIVE RIDERS</span>
+              <div className="metric-icon-wrap" style={{ width: 28, height: 28 }}><Users size={14} /></div>
+            </div>
+            <strong className="metric-value" style={{ fontSize: "1.5rem" }}>{activeRidersCount}</strong>
+            <small className="metric-subtext">Carrying cargo or in-transit</small>
+          </div>
+
+          {/* 8. Available riders */}
+          <div className="metric-card metric-mint" style={{ padding: "14px 16px" }}>
+            <div className="metric-header" style={{ marginBottom: 6 }}>
+              <span className="metric-label" style={{ fontSize: "0.68rem" }}>AVAILABLE RIDERS</span>
+              <div className="metric-icon-wrap" style={{ width: 28, height: 28 }}><Users size={14} /></div>
+            </div>
+            <strong className="metric-value text-mint" style={{ fontSize: "1.5rem" }}>{availableRidersCount}</strong>
+            <small className="metric-subtext">Zero load & ready</small>
+          </div>
+
+          {/* 9. Partially loaded riders */}
+          <div className="metric-card metric-amber" style={{ padding: "14px 16px" }}>
+            <div className="metric-header" style={{ marginBottom: 6 }}>
+              <span className="metric-label" style={{ fontSize: "0.68rem" }}>PARTIALLY LOADED</span>
+              <div className="metric-icon-wrap" style={{ width: 28, height: 28 }}><Users size={14} /></div>
+            </div>
+            <strong className="metric-value" style={{ fontSize: "1.5rem" }}>{partiallyLoadedCount}</strong>
+            <small className="metric-subtext">Riders with remaining space</small>
+          </div>
+
+          {/* 10. Fully loaded / busy riders */}
+          <div className="metric-card metric-violet" style={{ padding: "14px 16px" }}>
+            <div className="metric-header" style={{ marginBottom: 6 }}>
+              <span className="metric-label" style={{ fontSize: "0.68rem" }}>FULLY LOADED / BUSY</span>
+              <div className="metric-icon-wrap" style={{ width: 28, height: 28 }}><Users size={14} /></div>
+            </div>
+            <strong className="metric-value" style={{ fontSize: "1.5rem" }}>{fullyLoadedCount}</strong>
+            <small className="metric-subtext">At max capacity or on road</small>
+          </div>
+
+          {/* 11. Open shelters */}
+          <div className="metric-card metric-mint" style={{ padding: "14px 16px" }}>
+            <div className="metric-header" style={{ marginBottom: 6 }}>
+              <span className="metric-label" style={{ fontSize: "0.68rem" }}>OPEN SHELTERS</span>
+              <div className="metric-icon-wrap" style={{ width: 28, height: 28 }}><Building2 size={14} /></div>
+            </div>
+            <strong className="metric-value text-mint" style={{ fontSize: "1.5rem" }}>{openSheltersCount} / {shelters.length}</strong>
+            <small className="metric-subtext">Accepting drop-offs</small>
+          </div>
+
+          {/* 12. Remaining shelter demand */}
+          <div className="metric-card metric-teal" style={{ padding: "14px 16px" }}>
+            <div className="metric-header" style={{ marginBottom: 6 }}>
+              <span className="metric-label" style={{ fontSize: "0.68rem" }}>REMAINING DEMAND</span>
+              <div className="metric-icon-wrap" style={{ width: 28, height: 28 }}><Building2 size={14} /></div>
+            </div>
+            <strong className="metric-value" style={{ fontSize: "1.5rem" }}>{remainingShelterDemand}</strong>
+            <small className="metric-subtext">Unmet shelter demand</small>
+          </div>
+        </div>
+      </section>
 
       {/* Available Food Batches Section */}
       <section className="batches-section">
         <div className="section-title-row">
           <div>
             <span className="eyebrow">STAGE 01</span>
-            <h3>Available Donation Batches</h3>
+            <h3>Food Batches in Kitchen Hub Inventory</h3>
           </div>
-          <span className="micro-badge">{batches.length} BATCHES CATALOGED</span>
+          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            <button
+              onClick={() => handleOpenManualModal(undefined, undefined)}
+              className="pill-btn pill-btn-mint"
+              style={{ fontSize: "0.75rem", padding: "4px 10px", display: "flex", alignItems: "center", gap: 5 }}
+            >
+              <Plus size={13} /> Allocate Selected
+            </button>
+            <span className="micro-badge">{batches.length} BATCHES READY</span>
+          </div>
         </div>
 
         <div className="batch-cards-grid">
           {batches.map((batch) => {
-            const isSelected = batch.id === currentBatch.id;
+            const isSelected = batch.id === currentBatch?.id;
             const batchSafeMinutes = Math.max(0, Math.round((batch.safeUntil - DEMO_NOW) / 60_000));
             const tone = batchSafeMinutes > 30 ? "good" : batchSafeMinutes >= 15 ? "warn" : "bad";
             const prepMinutesAgo = Math.round((DEMO_NOW - batch.preparedAt) / 60_000);
+            const availQty = Math.max(0, batch.quantity - batch.alreadyAllocated);
 
             return (
               <div
@@ -177,8 +360,10 @@ export function SmartBatchAllocationScreen() {
 
                 <div className="batch-card-body">
                   <div className="batch-qty-row">
-                    <strong className="batch-qty-num">{batch.quantity}</strong>
-                    <span className="batch-qty-label">{batch.commodity.replace("-", " ")}</span>
+                    <strong className="batch-qty-num">{availQty}</strong>
+                    <span className="batch-qty-label">
+                      avail of {batch.quantity} {batch.commodity.replace("-", " ")}
+                    </span>
                   </div>
 
                   <div className="batch-meta-list">
@@ -199,9 +384,9 @@ export function SmartBatchAllocationScreen() {
 
                 <div className="batch-card-footer">
                   <span className="selection-indicator">
-                    {isSelected ? "● CURRENTLY TARGETED" : "CLICK TO ALLOCATE"}
+                    {isSelected ? "● SELECTED FOR ALLOCATION" : "CLICK TO TARGET"}
                   </span>
-                  <span className="pickup-time mono">Pickup ~{batch.pickupMinutes}m</span>
+                  <span className="pickup-time mono">Allocated: {batch.alreadyAllocated}</span>
                 </div>
               </div>
             );
@@ -209,551 +394,477 @@ export function SmartBatchAllocationScreen() {
         </div>
       </section>
 
-      {/* Live Allocation KPI Summary Bar */}
-      <section className="metrics-row">
-        <div className="metric-card metric-mint">
-          <div className="metric-header">
-            <span className="metric-label">BATCH QUANTITY</span>
-            <div className="metric-icon-wrap"><Package size={18} /></div>
+      {/* STAGE 02: Shelter Intake & Management (Placed directly below Food Batches) */}
+      <section className="panel" style={{ marginBottom: 24 }}>
+        <div className="panel-heading compact" style={{ marginBottom: 16 }}>
+          <div>
+            <p className="eyebrow">STAGE 02 / DESTINATIONS</p>
+            <h3>Shelter Intake & Management</h3>
           </div>
-          <strong className="metric-value">{currentBatch.quantity}</strong>
-          <div className="metric-footer">
-            <small className="metric-subtext">{currentBatch.id} · {currentBatch.commodity}</small>
-            <span className={`metric-trend badge ${safeLifeClass}`}>{safeMinutesRemaining}m safe</span>
-          </div>
-        </div>
-
-        <div className="metric-card metric-teal">
-          <div className="metric-header">
-            <span className="metric-label">SAFELY ALLOCATED</span>
-            <div className="metric-icon-wrap"><CheckCircle2 size={18} /></div>
-          </div>
-          <strong className="metric-value">{allocationResult.allocatedQuantity}</strong>
-          <div className="metric-footer">
-            <small className="metric-subtext">Across {allocationResult.assignments.length} verified routes</small>
-            <span className="metric-trend text-mint">
-              {Math.round((allocationResult.allocatedQuantity / Math.max(1, currentBatch.quantity)) * 100)}%
-            </span>
+          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            <button
+              onClick={() => handleOpenShelterModal()}
+              className="pill-btn pill-btn-mint"
+              style={{ fontSize: "0.75rem", padding: "5px 12px", display: "flex", alignItems: "center", gap: 6 }}
+            >
+              <Edit3 size={13} /> Edit Shelters
+            </button>
+            <span className="micro-badge">{openSheltersCount} Open / {shelters.length} Facilities</span>
           </div>
         </div>
 
-        <div className="metric-card metric-amber">
-          <div className="metric-header">
-            <span className="metric-label">UNALLOCATED INVENTORY</span>
-            <div className="metric-icon-wrap"><AlertTriangle size={18} /></div>
-          </div>
-          <strong className="metric-value">{allocationResult.unallocatedQuantity}</strong>
-          <div className="metric-footer">
-            <small className="metric-subtext">
-              {allocationResult.unallocatedQuantity > 0 ? "Protected by safety gates" : "100% matched safely"}
-            </small>
-            <span className={`metric-trend ${allocationResult.unallocatedQuantity > 0 ? "badge bad" : ""}`}>
-              {allocationResult.unallocatedQuantity > 0 ? "Held" : "Clean"}
-            </span>
-          </div>
-        </div>
+        <div className="shelter-cards-grid">
+          {shelters.map((shelter) => {
+            const unmet = Math.max(0, shelter.requestedQuantity - shelter.alreadyReceivedQuantity);
+            const pct = shelter.requestedQuantity > 0
+              ? Math.min(100, Math.round((shelter.alreadyReceivedQuantity / shelter.requestedQuantity) * 100))
+              : 100;
+            const isClosed = shelter.status === "closed";
 
-        <div className="metric-card metric-violet">
-          <div className="metric-header">
-            <span className="metric-label">SATISFACTION & FLEET</span>
-            <div className="metric-icon-wrap"><Users size={18} /></div>
-          </div>
-          <strong className="metric-value">{demandSatisfaction}%</strong>
-          <div className="metric-footer">
-            <small className="metric-subtext">{fleetUtilization}% fleet payload capacity utilized</small>
-            <span className="metric-trend">{allocationResult.availableRiderCount} riders</span>
-          </div>
+            return (
+              <div key={shelter.id} className={`shelter-card ${isClosed ? "card-closed" : ""}`}>
+                <div className="shelter-card-header">
+                  <div className="shelter-identity">
+                    <div className="building-icon-badge"><Building2 size={16} /></div>
+                    <div className="shelter-info">
+                      <strong className="shelter-name" title={shelter.name}>{shelter.name}</strong>
+                      <span className="shelter-sublabel">{shelter.travelMinutes}m route · Cap {shelter.capacity}</span>
+                    </div>
+                  </div>
+
+                  <div className="shelter-header-actions">
+                    <button
+                      className={`status-pill ${isClosed ? "pill-bad" : unmet === 0 ? "pill-mint" : "pill-need"}`}
+                      onClick={() => toggleShelterStatus(shelter.id)}
+                      title="Click to toggle Open/Closed status"
+                      style={{ cursor: "pointer", fontSize: "0.72rem", padding: "4px 8px" }}
+                    >
+                      {isClosed ? "Closed" : unmet === 0 ? "Satisfied" : `${unmet} Needed`}
+                    </button>
+                    <button
+                      className="icon-action-btn"
+                      onClick={() => handleOpenShelterModal(shelter.id)}
+                      title="Edit shelter demand, capacity & travel time"
+                      style={{
+                        background: "transparent",
+                        border: "1px solid var(--border-subtle)",
+                        color: "var(--text-muted)",
+                        padding: "5px 7px",
+                        borderRadius: 6,
+                        cursor: "pointer",
+                      }}
+                    >
+                      <Edit3 size={12} />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="shelter-progress-block" style={{ marginTop: 6 }}>
+                  <div className="progress-labels">
+                    <span>Intake: <strong>{shelter.alreadyReceivedQuantity}</strong> / {shelter.requestedQuantity} meals</span>
+                    <strong className="mono">{pct}%</strong>
+                  </div>
+                  <div className="progress-track" style={{ height: 6 }}>
+                    <div
+                      className={`progress-fill ${isClosed ? "fill-closed" : pct === 100 ? "fill-mint" : "fill-blue"}`}
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </div>
       </section>
 
-      {/* Main 2-Column Split: Controls/Config vs Allocation Results */}
-      <div className="workspace-layout">
-        {/* Left Column: Batch Sliders, Config & Fleet/Shelter Controls */}
-        <aside className="controls-column">
-          {/* Quick Tuning Panel */}
-          <div className="panel control-panel">
-            <div className="panel-heading compact">
-              <div>
-                <p className="eyebrow">LIVE ALLOCATION CONFIG</p>
-                <h3>Target Batch Tuning</h3>
-              </div>
-              <SlidersHorizontal size={16} className="text-mint" />
-            </div>
+      {/* STAGE 03: Rider Capacity & Real-Time Status (Placed right after Shelters) */}
+      <section className="panel" style={{ marginBottom: 24 }}>
+        <div className="panel-heading compact" style={{ marginBottom: 16 }}>
+          <div>
+            <p className="eyebrow">STAGE 03 / FLEET TELEMETRY</p>
+            <h3>Rider Capacity & Real-Time Status</h3>
+          </div>
+          <span className="micro-badge">{activeRidersCount} Active / {riders.length} Fleet Registered</span>
+        </div>
 
-            <div className="control-group">
-              <div className="label-with-value">
-                <span className="input-label">Batch Donation Meals</span>
-                <strong className="mono val-badge">{currentBatch.quantity}</strong>
-              </div>
-              <input
-                type="range"
-                min="10"
-                max="300"
-                step="5"
-                value={currentBatch.quantity}
-                onChange={(e) => updateBatchQuantity(Number(e.target.value))}
-                className="custom-range"
-              />
-              <div className="range-bounds">
-                <span>10</span>
-                <span>150</span>
-                <span>300</span>
-              </div>
-            </div>
+        <div className="rider-cards-grid">
+          {riders.map((rider) => {
+            const freeCap = Math.max(0, rider.carryingCapacity - rider.currentLoad);
+            const pct = Math.min(100, Math.round((rider.currentLoad / rider.carryingCapacity) * 100));
+            const isOffline = !rider.available;
+            const opStatus = rider.operationalStatus ?? "Available";
 
-            <div className="control-group">
-              <div className="label-with-value">
-                <span className="input-label">Remaining Safe-Life</span>
-                <strong className={`mono val-badge ${safeMinutesRemaining <= 15 ? "badge-critical" : ""}`}>
-                  {safeMinutesRemaining} mins
-                </strong>
-              </div>
-              <input
-                type="range"
-                min="5"
-                max="180"
-                step="5"
-                value={safeMinutesRemaining}
-                onChange={(e) => updateBatchSafeMinutes(Number(e.target.value))}
-                className="custom-range"
-              />
-              <div className="range-bounds">
-                <span>5m (Critical)</span>
-                <span>75m (Standard)</span>
-                <span>180m</span>
-              </div>
-            </div>
+            const statusClass =
+              opStatus === "Available"
+                ? "badge-status-available"
+                : opStatus === "Partially Loaded"
+                ? "badge-status-partial"
+                : opStatus === "Fully Loaded"
+                ? "badge-status-full"
+                : "badge-status-delivery";
 
-            <div className="control-group">
-              <div className="label-with-value">
-                <span className="input-label">Mandatory Safety Buffer</span>
-                <strong className="mono val-badge">{config.safetyBufferMinutes} mins</strong>
-              </div>
-              <input
-                type="range"
-                min="0"
-                max="20"
-                step="1"
-                value={config.safetyBufferMinutes}
-                onChange={(e) => setConfig((c) => ({ ...c, safetyBufferMinutes: Number(e.target.value) }))}
-                className="custom-range"
-              />
-              <div className="range-bounds">
-                <span>0m</span>
-                <span>8m (Recommended)</span>
-                <span>20m</span>
-              </div>
-            </div>
+            return (
+              <div key={rider.id} className={`rider-card ${isOffline ? "card-offline" : ""}`}>
+                {/* Header: Identity & Online Toggle */}
+                <div className="rider-card-header">
+                  <div className="rider-identity">
+                    <div className="rider-avatar-circle">{rider.name.charAt(0)}</div>
+                    <div className="rider-info">
+                      <strong className="rider-name" title={rider.name}>{rider.name}</strong>
+                      <span className="rider-sublabel">{rider.id} · Cap {rider.carryingCapacity}</span>
+                    </div>
+                  </div>
 
-            {/* Configurable Multi-Factor Weight Sliders */}
-            <div className="weights-accordion">
-              <button
-                className="accordion-toggle"
-                onClick={() => setShowConfig(!showConfig)}
-              >
-                <div className="accordion-title">
-                  <TrendingUp size={14} className="text-mint" />
-                  <span>Rank Scoring Weights (0 to 1)</span>
+                  <button
+                    className={`online-status-pill ${isOffline ? "offline" : "online"}`}
+                    onClick={() => toggleRiderAvailability(rider.id)}
+                    title="Click to toggle Available / Offline status"
+                  >
+                    <span className="online-indicator-dot" />
+                    {isOffline ? "Offline" : "Online"}
+                  </button>
                 </div>
-                {showConfig ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-              </button>
 
-              {showConfig && (
-                <div className="weights-body">
-                  <div className="weight-slider-row">
-                    <div className="label-with-value">
-                      <span>Urgency Weight (0.35 default)</span>
-                      <strong className="mono">{Math.round(config.weights.urgency * 100)}%</strong>
-                    </div>
-                    <input
-                      type="range"
-                      min="0"
-                      max="1"
-                      step="0.05"
-                      value={config.weights.urgency}
-                      onChange={(e) => updateWeight("urgency", Number(e.target.value))}
-                      className="custom-range mini-range"
-                    />
-                  </div>
-
-                  <div className="weight-slider-row">
-                    <div className="label-with-value">
-                      <span>Feasibility Weight (0.25 default)</span>
-                      <strong className="mono">{Math.round(config.weights.feasibility * 100)}%</strong>
-                    </div>
-                    <input
-                      type="range"
-                      min="0"
-                      max="1"
-                      step="0.05"
-                      value={config.weights.feasibility}
-                      onChange={(e) => updateWeight("feasibility", Number(e.target.value))}
-                      className="custom-range mini-range"
-                    />
-                  </div>
-
-                  <div className="weight-slider-row">
-                    <div className="label-with-value">
-                      <span>Expiry Urgency (0.20 default)</span>
-                      <strong className="mono">{Math.round(config.weights.expiryUrgency * 100)}%</strong>
-                    </div>
-                    <input
-                      type="range"
-                      min="0"
-                      max="1"
-                      step="0.05"
-                      value={config.weights.expiryUrgency}
-                      onChange={(e) => updateWeight("expiryUrgency", Number(e.target.value))}
-                      className="custom-range mini-range"
-                    />
-                  </div>
-
-                  <div className="weight-slider-row">
-                    <div className="label-with-value">
-                      <span>Fairness Weight (0.10 default)</span>
-                      <strong className="mono">{Math.round(config.weights.fairness * 100)}%</strong>
-                    </div>
-                    <input
-                      type="range"
-                      min="0"
-                      max="1"
-                      step="0.05"
-                      value={config.weights.fairness}
-                      onChange={(e) => updateWeight("fairness", Number(e.target.value))}
-                      className="custom-range mini-range"
-                    />
-                  </div>
-
-                  <div className="weight-slider-row">
-                    <div className="label-with-value">
-                      <span>Reliability Weight (0.10 default)</span>
-                      <strong className="mono">{Math.round(config.weights.reliability * 100)}%</strong>
-                    </div>
-                    <input
-                      type="range"
-                      min="0"
-                      max="1"
-                      step="0.05"
-                      value={config.weights.reliability}
-                      onChange={(e) => updateWeight("reliability", Number(e.target.value))}
-                      className="custom-range mini-range"
-                    />
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Shelter Demands with Status Toggle */}
-          <div className="panel">
-            <div className="panel-heading compact">
-              <div>
-                <p className="eyebrow">DESTINATIONS</p>
-                <h3>Shelter Intake & Demand</h3>
-              </div>
-              <span className="micro-badge">{shelters.filter((s) => s.status === "open").length} Open</span>
-            </div>
-
-            <div className="cards-list">
-              {shelters.map((shelter) => {
-                const remaining = allocationResult.remainingDemand[shelter.id] ?? shelter.requestedQuantity;
-                const allocated = shelter.requestedQuantity - remaining;
-                const pct = shelter.requestedQuantity > 0 ? Math.round((allocated / shelter.requestedQuantity) * 100) : 0;
-                const isClosed = shelter.status === "closed";
-
-                return (
-                  <div key={shelter.id} className={`card-item ${isClosed ? "card-closed" : ""}`}>
-                    <div className="card-top-row">
-                      <div className="card-identity">
-                        <div className="building-icon-badge"><Building2 size={14} /></div>
-                        <div>
-                          <strong className="card-name">{shelter.name}</strong>
-                          <div className="card-subtext">{shelter.travelMinutes}m route · Cap: {shelter.capacity}</div>
-                        </div>
-                      </div>
-
-                      <button
-                        className={`status-pill ${isClosed ? "pill-bad" : "pill-need"}`}
-                        onClick={() => toggleShelterStatus(shelter.id)}
-                        title="Click to toggle Open/Closed status"
-                      >
-                        {isClosed ? "Closed (Click)" : `${remaining} Needed`}
-                      </button>
-                    </div>
-
-                    <div className="progress-group">
-                      <div className="progress-labels">
-                        <span>Fulfillment: {allocated} / {shelter.requestedQuantity} meals</span>
-                        <strong className="mono">{pct}%</strong>
-                      </div>
-                      <div className="progress-track">
-                        <div
-                          className={`progress-fill ${isClosed ? "fill-closed" : pct === 100 ? "fill-mint" : "fill-blue"}`}
-                          style={{ width: `${pct}%` }}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Volunteer Riders with Availability Toggle */}
-          <div className="panel">
-            <div className="panel-heading compact">
-              <div>
-                <p className="eyebrow">FLEET</p>
-                <h3>Rider Capacity & Load</h3>
-              </div>
-              <span className="micro-badge">{riders.filter((r) => r.available).length} Active</span>
-            </div>
-
-            <div className="cards-list">
-              {riders.map((rider) => {
-                const remaining = allocationResult.remainingCapacity[rider.id] ?? rider.carryingCapacity;
-                const used = rider.carryingCapacity - remaining;
-                const pct = Math.round((used / rider.carryingCapacity) * 100);
-                const isOffline = !rider.available;
-
-                return (
-                  <div key={rider.id} className={`card-item ${isOffline ? "card-offline" : ""}`}>
-                    <div className="card-top-row">
-                      <div className="card-identity">
-                        <div className="rider-icon-badge"><Users size={14} /></div>
-                        <div>
-                          <strong className="card-name">{rider.name}</strong>
-                          <div className="card-subtext">{rider.id} · Reliability {Math.round(rider.reliability * 100)}%</div>
-                        </div>
-                      </div>
-
-                      <button
-                        className={`status-pill ${isOffline ? "pill-bad" : "pill-active"}`}
-                        onClick={() => toggleRiderAvailable(rider.id)}
-                        title="Click to toggle Available/Offline status"
-                      >
-                        {isOffline ? "Offline (Click)" : `${remaining} Free`}
-                      </button>
-                    </div>
-
-                    <div className="progress-group">
-                      <div className="progress-labels">
-                        <span>Payload: {used} / {rider.carryingCapacity} meals</span>
-                        <strong className="mono">{pct}%</strong>
-                      </div>
-                      <div className="progress-track">
-                        <div
-                          className={`progress-fill ${isOffline ? "fill-closed" : "fill-violet"}`}
-                          style={{ width: `${pct}%` }}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </aside>
-
-        {/* Right Column: Allocation Results Plan Table & Topology */}
-        <main className="results-column">
-          {/* View Tab Switcher */}
-          <div className="view-switcher-bar">
-            <div className="tab-group">
-              <button
-                className={`tab-btn ${activeTab === "PLAN" ? "active" : ""}`}
-                onClick={() => setActiveTab("PLAN")}
-              >
-                <Package size={14} /> Allocation Results ({allocationResult.assignments.length} Routes)
-              </button>
-              <button
-                className={`tab-btn ${activeTab === "TOPOLOGY" ? "active" : ""}`}
-                onClick={() => setActiveTab("TOPOLOGY")}
-              >
-                <Sparkles size={14} /> Network Dispatch Topology
-              </button>
-            </div>
-            <div className="view-meta">
-              <span className="dispatch-badge">
-                <span className="pulse-indicator" />
-                DETERMINISTIC V2.4
-              </span>
-            </div>
-          </div>
-
-          {activeTab === "TOPOLOGY" ? (
-            <div className="panel topology-panel">
-              <NetworkVisualizer
-                batch={currentBatch}
-                riders={riders}
-                shelters={shelters}
-                assignments={allocationResult.assignments}
-              />
-            </div>
-          ) : (
-            <div className="panel panel-results">
-              <div className="panel-heading">
-                <div>
-                  <p className="eyebrow">DISPATCH BOARD</p>
-                  <h3>Deterministic Allocation Results</h3>
-                </div>
-                <div className="heading-badges">
-                  <span className="badge good">
-                    <CheckCircle2 size={13} /> {allocationResult.assignments.length} Routes Generated
+                {/* Status Badge & Free Cap Row */}
+                <div className="rider-status-row">
+                  <span className={`rider-status-tag ${statusClass}`}>
+                    {opStatus.toUpperCase()}
                   </span>
-                  <span className="badge teal">
-                    <Package size={13} /> {allocationResult.allocatedQuantity} Meals Assigned
+                  <span className="rider-free-cap-text">
+                    Free: <strong>{freeCap}</strong> meals
                   </span>
                 </div>
+
+                {/* Progress Group */}
+                <div className="rider-progress-block">
+                  <div className="progress-labels">
+                    <span>Payload: <strong>{rider.currentLoad}</strong> / {rider.carryingCapacity}</span>
+                    <strong className="mono">{pct}%</strong>
+                  </div>
+                  <div className="progress-track" style={{ height: 6 }}>
+                    <div
+                      className={`progress-fill ${isOffline ? "fill-closed" : opStatus === "Fully Loaded" ? "fill-violet" : opStatus === "On Delivery" ? "fill-blue" : "fill-mint"}`}
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                </div>
+
+                {/* Card Action Footer */}
+                <div className="rider-card-footer">
+                  {rider.available && freeCap > 0 && opStatus !== "On Delivery" ? (
+                    <button
+                      className="assign-rider-action-btn"
+                      onClick={() => handleOpenManualModal(rider.id)}
+                    >
+                      <Plus size={13} /> Assign Meals
+                    </button>
+                  ) : opStatus === "On Delivery" ? (
+                    <span className="rider-footer-pill on-delivery">
+                      <Truck size={13} /> On Delivery Route
+                    </span>
+                  ) : opStatus === "Fully Loaded" ? (
+                    <span className="rider-footer-pill fully-loaded">
+                      ✓ At Full Capacity
+                    </span>
+                  ) : (
+                    <span className="rider-footer-pill offline-tag">
+                      Rider Offline
+                    </span>
+                  )}
+                </div>
               </div>
+            );
+          })}
+        </div>
+      </section>
 
-              {allocationResult.assignments.length > 0 ? (
-                <div className="table-scroll">
-                  <table className="results-table">
-                    <thead>
-                      <tr>
-                        <th>RIDER</th>
-                        <th>DESTINATION</th>
-                        <th>QTY ALLOCATED</th>
-                        <th>TRANSIT ETA</th>
-                        <th>SAFETY MARGIN</th>
-                        <th>SCORE</th>
-                        <th>STATUS</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {allocationResult.assignments.map((assignment) => {
-                        const isHovered = hoveredScoreId === assignment.id;
-                        const margin = assignment.safetyMarginMinutes;
-                        const marginClass = margin > 15 ? "margin-high" : margin >= 5 ? "margin-medium" : "margin-low";
+      {/* STAGE 04: Active Assignments & Dispatch Board (Full-Width Clean Table & Topology) */}
+      <section className="dispatch-board-section" style={{ marginBottom: 24 }}>
+        {/* View Tab Switcher */}
+        <div className="view-switcher-bar" style={{ marginBottom: 14 }}>
+          <div className="tab-group">
+            <button
+              className={`tab-btn ${activeTab === "PLAN" ? "active" : ""}`}
+              onClick={() => setActiveTab("PLAN")}
+            >
+              <Package size={14} /> Active Assignments & Dispatch Board ({assignments.length})
+            </button>
+            <button
+              className={`tab-btn ${activeTab === "TOPOLOGY" ? "active" : ""}`}
+              onClick={() => setActiveTab("TOPOLOGY")}
+            >
+              <Sparkles size={14} /> Network Dispatch Topology
+            </button>
+          </div>
+          <div className="view-meta">
+            <button
+              onClick={() => handleOpenManualModal()}
+              className="pill-btn pill-btn-mint"
+              style={{ fontSize: "0.75rem", padding: "5px 12px", display: "flex", alignItems: "center", gap: 6 }}
+            >
+              <Plus size={14} /> New Assignment
+            </button>
+          </div>
+        </div>
 
-                        return (
-                          <tr key={assignment.id} className="assignment-row">
-                            <td>
-                              <div className="rider-cell">
-                                <div className="rider-avatar">{assignment.riderName[0]}</div>
-                                <div>
-                                  <strong className="rider-name">{assignment.riderName}</strong>
-                                  <span className="rider-id-badge mono">{assignment.riderId}</span>
-                                </div>
+        {activeTab === "TOPOLOGY" ? (
+          <div className="panel topology-panel">
+            <NetworkVisualizer
+              batch={currentBatch}
+              riders={riders}
+              shelters={shelters}
+              assignments={assignments}
+            />
+          </div>
+        ) : (
+          <div className="panel panel-results">
+            <div className="panel-heading">
+              <div>
+                <p className="eyebrow">STAGE 04 / DISPATCH CONTROL TABLE</p>
+                <h3>Active Food Assignments & Workflow Lifecycle</h3>
+              </div>
+              <div className="heading-badges">
+                <span className="badge teal">
+                  <Package size={13} /> {assignments.length} Total Assignments
+                </span>
+                <span className="badge good">
+                  <CheckCircle2 size={13} /> {deliveredMeals} Meals Delivered
+                </span>
+              </div>
+            </div>
+
+            {assignments.length > 0 ? (
+              <div className="table-scroll">
+                <table className="results-table">
+                  <thead>
+                    <tr>
+                      <th>ASSIGNMENT</th>
+                      <th>RIDER</th>
+                      <th>DESTINATION</th>
+                      <th>QTY</th>
+                      <th>LIFECYCLE STATUS</th>
+                      <th style={{ textAlign: "right" }}>ACTIONS</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {assignments.map((assignment) => {
+                      const status = assignment.lifecycleStatus || "Allocated";
+
+                      return (
+                        <tr key={assignment.id} className="assignment-row">
+                          <td>
+                            <span className="mono" style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
+                              {assignment.id}
+                            </span>
+                          </td>
+                          <td>
+                            <div className="rider-cell">
+                              <div className="rider-avatar">{assignment.riderName[0]}</div>
+                              <div>
+                                <strong className="rider-name">{assignment.riderName}</strong>
+                                <span className="rider-id-badge mono">{assignment.riderId}</span>
                               </div>
-                            </td>
-                            <td>
-                              <div className="shelter-cell">
-                                <strong className="shelter-name">{assignment.shelterName}</strong>
-                                <span className="shelter-route-subtext mono">{assignment.shelterId}</span>
-                              </div>
-                            </td>
-                            <td>
-                              <div className="qty-cell">
-                                <strong className="qty-num">{assignment.quantity}</strong>
-                                <small className="qty-unit">meals</small>
-                              </div>
-                            </td>
-                            <td>
-                              <div className="time-cell">
-                                <div className="time-primary">
-                                  <Clock size={13} className="text-muted" />
-                                  <span className="mono">{assignment.completionMinutes}m</span>
-                                </div>
-                                <small className="time-eta">
-                                  ETA {new Date(assignment.completionAt).toISOString().slice(11, 16)} UTC
-                                </small>
-                              </div>
-                            </td>
-                            <td>
-                              <div className="margin-cell">
-                                <span className={`safety-badge ${marginClass}`}>
-                                  {Math.floor(margin)}m margin
-                                </span>
-                                <div className="mini-margin-track">
-                                  <div
-                                    className={`mini-margin-fill ${marginClass}`}
-                                    style={{ width: `${Math.min(100, Math.max(10, (margin / 60) * 100))}%` }}
-                                  />
-                                </div>
-                              </div>
-                            </td>
-                            <td className="relative-cell">
-                              <div
-                                className="score-cell-trigger"
-                                onMouseEnter={() => setHoveredScoreId(assignment.id)}
-                                onMouseLeave={() => setHoveredScoreId(null)}
-                              >
-                                <span className="score-pill-refined">
-                                  <TrendingUp size={11} /> {Math.round(assignment.score.total * 100)}%
-                                </span>
-                              </div>
-                              {isHovered && (
-                                <div className="score-popover">
-                                  <div className="popover-title">Scoring Factor Weights</div>
-                                  <div className="popover-row">
-                                    <span>Urgency (35%)</span>
-                                    <strong>{Math.round(assignment.score.urgency * 100)}%</strong>
-                                  </div>
-                                  <div className="popover-row">
-                                    <span>Feasibility (25%)</span>
-                                    <strong>{Math.round(assignment.score.feasibility * 100)}%</strong>
-                                  </div>
-                                  <div className="popover-row">
-                                    <span>Expiry Urgency (20%)</span>
-                                    <strong>{Math.round(assignment.score.expiryUrgency * 100)}%</strong>
-                                  </div>
-                                  <div className="popover-row">
-                                    <span>Fairness (10%)</span>
-                                    <strong>{Math.round(assignment.score.fairness * 100)}%</strong>
-                                  </div>
-                                  <div className="popover-row">
-                                    <span>Reliability (10%)</span>
-                                    <strong>{Math.round(assignment.score.reliability * 100)}%</strong>
-                                  </div>
-                                </div>
+                            </div>
+                          </td>
+                          <td>
+                            <div className="shelter-cell">
+                              <strong className="shelter-name">{assignment.shelterName}</strong>
+                              <span className="shelter-route-subtext mono">{assignment.shelterId}</span>
+                            </div>
+                          </td>
+                          <td>
+                            <div className="qty-cell">
+                              <strong className="qty-num">{assignment.quantity}</strong>
+                              <small className="qty-unit">meals</small>
+                            </div>
+                          </td>
+                          <td>
+                            <span
+                              className={`badge ${
+                                status === "Delivered"
+                                  ? "good"
+                                  : status === "In Transit"
+                                  ? "teal"
+                                  : status === "Confirmed"
+                                  ? "warn"
+                                  : status === "Cancelled"
+                                  ? "bad"
+                                  : "violet"
+                              }`}
+                            >
+                              {status.toUpperCase()}
+                            </span>
+                          </td>
+                          <td style={{ textAlign: "right" }}>
+                            <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", alignItems: "center" }}>
+                              {/* Stage 1: Allocated -> Can Confirm or Release */}
+                              {status === "Allocated" && (
+                                <>
+                                  <button
+                                    className="pill-btn pill-btn-mint"
+                                    onClick={() => handleConfirmDispatch(assignment.id)}
+                                    style={{ fontSize: "0.72rem", padding: "4px 8px" }}
+                                  >
+                                    Confirm Dispatch
+                                  </button>
+                                  <button
+                                    className="pill-btn pill-btn-danger"
+                                    onClick={() => handleReleaseAssignment(assignment.id)}
+                                    style={{ fontSize: "0.72rem", padding: "4px 8px" }}
+                                  >
+                                    Release
+                                  </button>
+                                </>
                               )}
-                            </td>
-                            <td>
-                              <span className="status-chip ready">
-                                <span className="pulse-dot" /> DISPATCH READY
-                              </span>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <div className="empty-state large">
-                  <AlertTriangle size={32} className="text-coral" />
-                  <div>
-                    <strong>No Feasible Delivery Routes Available</strong>
-                    <p>Current safety buffers, expiry limits, or shelter closures prevent safe assignment.</p>
-                  </div>
-                </div>
-              )}
 
-              {allocationResult.unallocatedQuantity > 0 && (
-                <div className="warning-banner">
-                  <AlertTriangle size={18} className="text-amber" />
-                  <div className="banner-body">
-                    <strong>{allocationResult.unallocatedQuantity} Meals Held in Hub Reserve</strong>
-                    <p>
-                      {allocationResult.unallocatedInventory.reasons[0] ??
-                        "Remaining batch inventory preserved safely at kitchen hub to avoid forced drop-offs."}
-                    </p>
-                  </div>
+                              {/* Stage 2: Confirmed -> Can Mark Picked Up or Cancel */}
+                              {status === "Confirmed" && (
+                                <>
+                                  <button
+                                    className="pill-btn pill-btn-mint"
+                                    onClick={() => handleMarkPickedUp(assignment.id)}
+                                    style={{ fontSize: "0.72rem", padding: "4px 8px" }}
+                                  >
+                                    Mark Picked Up
+                                  </button>
+                                  <button
+                                    className="pill-btn pill-btn-danger"
+                                    onClick={() => handleReleaseAssignment(assignment.id)}
+                                    style={{ fontSize: "0.72rem", padding: "4px 8px" }}
+                                  >
+                                    Cancel
+                                  </button>
+                                </>
+                              )}
+
+                              {/* Stage 3: In Transit -> Can Mark Delivered. Release is strictly blocked for custody! */}
+                              {status === "In Transit" && (
+                                <>
+                                  <button
+                                    className="pill-btn pill-btn-mint"
+                                    onClick={() => handleMarkDelivered(assignment.id)}
+                                    style={{ fontSize: "0.72rem", padding: "4px 8px" }}
+                                  >
+                                    Mark Delivered
+                                  </button>
+                                  <span
+                                    title="Cargo in physical rider custody on road. Cannot release back to hub stock."
+                                    style={{
+                                      fontSize: "0.68rem",
+                                      color: "var(--text-muted)",
+                                      display: "flex",
+                                      alignItems: "center",
+                                      gap: 3,
+                                    }}
+                                  >
+                                    <ShieldAlert size={12} className="text-amber" /> Custody Active
+                                  </span>
+                                </>
+                              )}
+
+                              {/* Stage 4: Delivered */}
+                              {status === "Delivered" && (
+                                <span style={{ fontSize: "0.72rem", color: "var(--mint)", fontWeight: 600 }}>
+                                  ✓ Handover Complete
+                                </span>
+                              )}
+
+                              {/* Stage 5: Cancelled */}
+                              {status === "Cancelled" && (
+                                <span style={{ fontSize: "0.72rem", color: "var(--text-muted)" }}>
+                                  Released to Hub
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="empty-state large" style={{ padding: "48px 24px" }}>
+                <Package size={36} className="text-mint" style={{ opacity: 0.6 }} />
+                <div>
+                  <strong style={{ fontSize: "1.1rem" }}>No Active Food Assignments Yet</strong>
+                  <p style={{ marginTop: 6, color: "var(--text-muted)" }}>
+                    Click <strong>"+ Allocate Food"</strong> to manually dispatch meals to a volunteer rider and shelter,
+                    or load the sample 180-meal judge scenario.
+                  </p>
+                  <button
+                    className="primary-run-button"
+                    onClick={() => handleOpenManualModal()}
+                    style={{ marginTop: 16 }}
+                  >
+                    <Plus size={16} /> Allocate Food Now
+                  </button>
                 </div>
-              )}
+              </div>
+            )}
+          </div>
+        )}
+      </section>
+
+      {/* Live Operational Events Ledger / Audit Trail */}
+      <section className="panel audit-trail-panel" style={{ marginTop: 24 }}>
+        <div className="panel-heading compact">
+          <div>
+            <p className="eyebrow">AUDIT LEDGER</p>
+            <h3>Real-Time Operational Event Log</h3>
+          </div>
+          <span className="micro-badge">{events.length} LOGGED EVENTS</span>
+        </div>
+        <div className="event-stream">
+          {events.slice(0, 15).map((ev) => (
+            <div className="event-stream-item" key={ev.id}>
+              <div
+                className="event-bullet"
+                style={{
+                  background:
+                    ev.type === "DELIVERY"
+                      ? "var(--mint)"
+                      : ev.type === "PICKUP"
+                      ? "var(--cyan)"
+                      : ev.type === "CANCELLATION"
+                      ? "var(--coral)"
+                      : ev.type === "SHELTER"
+                      ? "var(--amber)"
+                      : "var(--mint)",
+                }}
+              />
+              <div className="event-content">
+                <span className="mono" style={{ fontSize: "0.72rem", color: "var(--text-muted)", marginRight: 8 }}>
+                  {ev.timeStr}
+                </span>
+                <strong className="event-text" style={{ marginRight: 8 }}>
+                  [{ev.type}] {ev.title}:
+                </strong>
+                <span style={{ fontSize: "0.82rem", color: "var(--text-secondary)" }}>
+                  {ev.detail}
+                </span>
+              </div>
+              <span className="event-status-badge">COMMITTED</span>
             </div>
-          )}
+          ))}
+        </div>
+      </section>
 
-          {/* Blocked Candidates Rejection Audit Table */}
-          <BlockedCandidatesTable
-            candidates={allocationResult.rejectedCandidates}
-            riders={riders}
-            shelters={shelters}
-          />
-        </main>
-      </div>
+      {/* Manual Allocation Modal */}
+      <ManualAllocationModal
+        isOpen={isManualModalOpen}
+        onClose={() => setIsManualModalOpen(false)}
+        preselectedBatchId={selectedBatchId}
+        preselectedRiderId={preselectedRiderId}
+        preselectedShelterId={preselectedShelterId}
+      />
+
+      {/* Shelter Management Modal */}
+      <ShelterManagementModal
+        isOpen={isShelterModalOpen}
+        onClose={() => setIsShelterModalOpen(false)}
+        initialShelterId={editingShelterId}
+      />
     </div>
   );
 }

@@ -15,6 +15,8 @@ export interface DonationBatch {
   sealed: boolean;
 }
 
+export type RiderOperationalStatus = "Available" | "Partially Loaded" | "Fully Loaded" | "On Delivery";
+
 export interface Rider {
   id: string;
   name: string;
@@ -24,6 +26,8 @@ export interface Rider {
   approved: boolean;
   reliability: number;
   pickedUpQuantity: number;
+  operationalStatus?: RiderOperationalStatus;
+  activeDeliveryId?: string | null;
 }
 
 export interface Shelter {
@@ -91,6 +95,7 @@ export interface AllocationAssignment {
   safetyMarginMinutes: number;
   score: ScoreBreakdown;
   status: "ready" | "blocked";
+  lifecycleStatus?: "Allocated" | "Confirmed" | "In Transit" | "Delivered" | "Cancelled";
   explanation: string;
 }
 

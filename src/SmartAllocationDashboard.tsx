@@ -16,6 +16,8 @@ import {
   ChevronDown,
   ChevronUp,
   ArrowUpRight,
+  Menu,
+  X,
 } from "lucide-react";
 import { AllocationResults } from "./AllocationResults";
 import { SmartBatchAllocationScreen } from "./SmartBatchAllocationScreen";
@@ -111,6 +113,17 @@ export function SmartAllocationDashboard() {
     }));
   };
 
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  const navItems = [
+    { id: "allocation", label: "Batch Allocation" },
+    { id: "ghost-claim", label: "Ghost-Claim Recovery" },
+    { id: "mid-route", label: "Mid-Route Rescue" },
+    { id: "dispatch", label: "Dispatch Board" },
+    { id: "topology", label: "Network Topology" },
+    { id: "audit", label: "Safety Audit" },
+  ];
+
   const handleRunAllocation = () => {
     setRunCount((count) => count + 1);
     const timeStr = new Date().toISOString().slice(11, 19);
@@ -127,69 +140,92 @@ export function SmartAllocationDashboard() {
     <div className="app-shell">
       {/* Top Navigation */}
       <header className="topbar">
+        {/* Subtle Ambient Radial Glow */}
+        <div className="topbar-ambient-glow" />
+
         <div className="topbar-left">
           <div className="brand-lockup">
-            <div className="brand-mark">
-              <Activity size={20} />
+            <div className="brand-mark-wrap">
+              <div className="brand-pulse-ring" />
+              <div className="brand-mark">
+                <Activity size={18} className="brand-icon-crisp" />
+              </div>
             </div>
             <div className="brand-text">
               <h1>
                 ResQFlow <span className="brand-divider">/</span> <span className="brand-sub">Dispatch OS</span>
               </h1>
-              <p className="brand-tagline">SMART BATCH ALLOCATION ENGINE</p>
+              <p className="brand-tagline">CIVIC LOGISTICS · ZERO-SPOILAGE GUARANTEE</p>
             </div>
           </div>
 
-          <nav className="nav-links">
-            <button
-              className={`nav-link ${activeTabNav === "allocation" ? "active" : ""}`}
-              onClick={() => setActiveTabNav("allocation")}
-            >
-              Batch Allocation
-            </button>
-            <button
-              className={`nav-link ${activeTabNav === "ghost-claim" ? "active" : ""}`}
-              onClick={() => setActiveTabNav("ghost-claim")}
-            >
-              Ghost-Claim Recovery
-            </button>
-            <button
-              className={`nav-link ${activeTabNav === "mid-route" ? "active" : ""}`}
-              onClick={() => setActiveTabNav("mid-route")}
-            >
-              Mid-Route Rescue
-            </button>
-            <button
-              className={`nav-link ${activeTabNav === "dispatch" ? "active" : ""}`}
-              onClick={() => setActiveTabNav("dispatch")}
-            >
-              Dispatch Board
-            </button>
-            <button
-              className={`nav-link ${activeTabNav === "topology" ? "active" : ""}`}
-              onClick={() => setActiveTabNav("topology")}
-            >
-              Network Topology
-            </button>
-            <button
-              className={`nav-link ${activeTabNav === "audit" ? "active" : ""}`}
-              onClick={() => setActiveTabNav("audit")}
-            >
-              Safety Audit
-            </button>
+          {/* Desktop Navigation Tabs */}
+          <nav className="nav-links desktop-nav" aria-label="Main Navigation">
+            {navItems.map((item) => {
+              const isActive = activeTabNav === item.id;
+              return (
+                <button
+                  key={item.id}
+                  className={`nav-link ${isActive ? "active" : ""}`}
+                  onClick={() => setActiveTabNav(item.id)}
+                  aria-current={isActive ? "page" : undefined}
+                >
+                  <span className="nav-link-text">{item.label}</span>
+                  {isActive && <span className="nav-link-glow-bar" />}
+                </button>
+              );
+            })}
           </nav>
         </div>
 
         <div className="topbar-right">
-          <div className="status-pill-online">
-            <span className="live-pulse" />
+          <div className="status-pill-online" title="Real-time deterministic safety engine status">
+            <div className="status-dot-container">
+              <span className="live-pulse" />
+              <span className="live-pulse-inner" />
+            </div>
             <span className="engine-status">ENGINE ONLINE · DETERMINISTIC V2.4</span>
           </div>
-          <div className="topbar-timestamp">
-            <Clock3 size={13} className="text-mint" />
+
+          <div className="topbar-timestamp" title="Live UTC telemetry clock">
+            <Clock3 size={13} className="clock-icon text-mint" />
             <span className="mono">{formatClock(currentTime)}</span>
           </div>
+
+          {/* Mobile Hamburger Toggle */}
+          <button
+            className="mobile-menu-toggle"
+            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+            aria-label={mobileMenuOpen ? "Close navigation menu" : "Open navigation menu"}
+            aria-expanded={mobileMenuOpen}
+          >
+            {mobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
+          </button>
         </div>
+
+        {/* Collapsible Mobile Navigation Drawer */}
+        {mobileMenuOpen && (
+          <div className="mobile-nav-drawer">
+            <nav className="mobile-nav-list">
+              {navItems.map((item) => {
+                const isActive = activeTabNav === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    className={`mobile-nav-link ${isActive ? "active" : ""}`}
+                    onClick={() => {
+                      setActiveTabNav(item.id);
+                      setMobileMenuOpen(false);
+                    }}
+                  >
+                    <span>{item.label}</span>
+                    {isActive && <span className="mobile-active-tag">ACTIVE</span>}
+                  </button>
+                );
+              })}
+            </nav>
+          </div>
+        )}
       </header>
 
       {/* Dedicated Smart Batch Allocation Screen */}

@@ -15,8 +15,10 @@ import {
 } from "lucide-react";
 import type { ActiveDelivery, Shelter, RescueCandidateShelter } from "./types";
 import { initialDeliveries, initialShelters, DEMO_NOW } from "./seedData";
+import { useDispatchStore } from "./DispatchContext";
 
 export function MidRouteRescueScreen() {
+  const { rerouteMidRouteDelivery } = useDispatchStore();
   const [deliveries, setDeliveries] = useState<ActiveDelivery[]>(() => structuredClone(initialDeliveries));
   const [shelters, setShelters] = useState<Shelter[]>(() => structuredClone(initialShelters));
   const [selectedDeliveryId, setSelectedDeliveryId] = useState<string>("DEL-401");
@@ -202,6 +204,8 @@ export function MidRouteRescueScreen() {
           : s,
       ),
     );
+
+    rerouteMidRouteDelivery(selectedDelivery.id, candidate.shelterId);
 
     setEvents((prev) => [
       {

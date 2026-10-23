@@ -1,6 +1,11 @@
-﻿import "./index.css";
+import "./index.css";
+import { DispatchProvider } from "./DispatchContext";
 import { SmartAllocationDashboard } from "./SmartAllocationDashboard";
 
 export default function App() {
-  return <SmartAllocationDashboard />;
+  return (
+    <DispatchProvider>
+      <SmartAllocationDashboard />
+    </DispatchProvider>
+  );
 }
