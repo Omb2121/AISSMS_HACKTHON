@@ -74,10 +74,20 @@ export const ResQFlowNetwork3D: React.FC<Network3DProps> = ({ className, interac
       powerPreference: "high-performance",
     });
     renderer.setSize(width, height);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.25;
     container.appendChild(renderer.domElement);
+
+    // Pause rendering when scrolled out of viewport for maximum smoothness & zero battery drain
+    let isVisible = true;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        isVisible = entry.isIntersecting;
+      },
+      { threshold: 0.05 }
+    );
+    observer.observe(container);
 
     const worldGroup = new THREE.Group();
     scene.add(worldGroup);
@@ -318,6 +328,8 @@ export const ResQFlowNetwork3D: React.FC<Network3DProps> = ({ className, interac
 
     const animate = () => {
       animId = requestAnimationFrame(animate);
+      if (!isVisible) return; // Skip work completely when scrolled out of view
+
       const delta = clock.getDelta();
       const time = clock.getElapsedTime();
 
@@ -509,6 +521,7 @@ export const ResQFlowNetwork3D: React.FC<Network3DProps> = ({ className, interac
     return () => {
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("resize", handleResize);
+      observer.disconnect();
       cancelAnimationFrame(animId);
 
       renderer.dispose();

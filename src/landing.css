@@ -604,6 +604,16 @@
   position: relative;
   z-index: 2;
   padding: 100px 24px;
+  content-visibility: auto;
+  contain-intrinsic-size: 800px;
+}
+
+.problem-card,
+.feature-triptych-card,
+.safety-gate-card {
+  will-change: transform, opacity;
+  transform: translateZ(0);
+  backface-visibility: hidden;
 }
 
 .section-container {
