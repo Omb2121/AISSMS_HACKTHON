@@ -66,7 +66,11 @@ function formatClock(timestamp: number) {
   }).format(timestamp);
 }
 
-export function SmartAllocationDashboard() {
+export interface SmartAllocationDashboardProps {
+  onNavigateHome?: () => void;
+}
+
+export function SmartAllocationDashboard({ onNavigateHome }: SmartAllocationDashboardProps = {}) {
   const [simulation, setSimulation] = useState<SimulationState>(() => createInitialSimulation());
   const [runCount, setRunCount] = useState(1);
   const [activeTabNav, setActiveTabNav] = useState("allocation");
@@ -179,6 +183,31 @@ export function SmartAllocationDashboard() {
         </div>
 
         <div className="topbar-right">
+          {onNavigateHome && (
+            <button
+              className="landing-return-btn"
+              onClick={onNavigateHome}
+              title="Return to ResQFlow Landing Page"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                background: "rgba(112, 240, 190, 0.08)",
+                border: "1px solid rgba(112, 240, 190, 0.3)",
+                color: "#70f0be",
+                fontSize: "0.74rem",
+                fontWeight: 700,
+                padding: "6px 12px",
+                borderRadius: 7,
+                cursor: "pointer",
+                transition: "all 0.18s ease",
+                whiteSpace: "nowrap",
+              }}
+            >
+              ← Landing Page
+            </button>
+          )}
+
           <div className="status-pill-online" title="Real-time deterministic safety engine status">
             <div className="status-dot-container">
               <span className="live-pulse" />
